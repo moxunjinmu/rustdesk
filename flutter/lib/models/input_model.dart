@@ -1658,49 +1658,63 @@ class InputModel {
     if (isViewOnly) return;
     if (isViewCamera) return;
     if (e is PointerScrollEvent) {
-      final rawDx = e.scrollDelta.dx;
-      final rawDy = e.scrollDelta.dy;
-      final dominantDelta = rawDx.abs() > rawDy.abs() ? rawDx.abs() : rawDy.abs();
-      final isSmooth = dominantDelta < 1;
-      final nowUs = DateTime.now().microsecondsSinceEpoch;
-      final dtUs = _lastWheelTsUs == 0 ? 0 : nowUs - _lastWheelTsUs;
-      _lastWheelTsUs = nowUs;
-      int accel = 1;
-      if (!isSmooth &&
-          dtUs > 0 &&
-          dtUs <= _wheelAccelMediumThresholdUs &&
-          (isWindows || isLinux) &&
-          peerPlatform == kPeerPlatformMacOS) {
-        final velocity = dominantDelta / dtUs;
-        if (velocity >= _wheelBurstVelocityThreshold) {
-          if (dtUs < _wheelAccelFastThresholdUs) {
-            accel = 3;
-          } else {
-            accel = 2;
-          }
+      _sendWheelDelta(e.scrollDelta.dx, e.scrollDelta.dy);
+    }
+  }
+
+  /// Android-only entry point: physical/bluetooth mouse wheel events are
+  /// captured natively (ACTION_SCROLL) in MainActivity and forwarded through
+  /// the 'mChannel' platform channel, because the Flutter engine drops scroll
+  /// events for some devices (notably bluetooth mice whose
+  /// InputDevice.isExternal() reports false, see rustdesk issues #1739/#3576).
+  void onNativeWheelScroll(double rawDx, double rawDy) {
+    if (isViewOnly) return;
+    if (isViewCamera) return;
+    if (!parent.target!.ffiModel.pi.isSet.isTrue) return;
+    _sendWheelDelta(rawDx, rawDy);
+  }
+
+  void _sendWheelDelta(double rawDx, double rawDy) {
+    final dominantDelta = rawDx.abs() > rawDy.abs() ? rawDx.abs() : rawDy.abs();
+    final isSmooth = dominantDelta < 1;
+    final nowUs = DateTime.now().microsecondsSinceEpoch;
+    final dtUs = _lastWheelTsUs == 0 ? 0 : nowUs - _lastWheelTsUs;
+    _lastWheelTsUs = nowUs;
+    int accel = 1;
+    if (!isSmooth &&
+        dtUs > 0 &&
+        dtUs <= _wheelAccelMediumThresholdUs &&
+        (isWindows || isLinux) &&
+        peerPlatform == kPeerPlatformMacOS) {
+      final velocity = dominantDelta / dtUs;
+      if (velocity >= _wheelBurstVelocityThreshold) {
+        if (dtUs < _wheelAccelFastThresholdUs) {
+          accel = 3;
+        } else {
+          accel = 2;
         }
       }
-      var dx = rawDx.toInt();
-      var dy = rawDy.toInt();
-      if (rawDx.abs() > rawDy.abs()) {
-        dy = 0;
-      } else {
-        dx = 0;
-      }
-      if (dx > 0) {
-        dx = -accel;
-      } else if (dx < 0) {
-        dx = accel;
-      }
-      if (dy > 0) {
-        dy = -accel;
-      } else if (dy < 0) {
-        dy = accel;
-      }
-      bind.sessionSendMouse(
-          sessionId: sessionId,
-          msg: '{"type": "wheel", "x": "$dx", "y": "$dy"}');
     }
+    var dx = rawDx.toInt();
+    var dy = rawDy.toInt();
+    if (rawDx.abs() > rawDy.abs()) {
+      dy = 0;
+    } else {
+      dx = 0;
+    }
+    if (dx > 0) {
+      dx = -accel;
+    } else if (dx < 0) {
+      dx = accel;
+    }
+    if (dy > 0) {
+      dy = -accel;
+    } else if (dy < 0) {
+      dy = accel;
+    }
+    bind.sessionSendMouse(
+        sessionId: sessionId,
+        msg: '{"type": "wheel", "x": "$dx", "y": "$dy"}');
   }
 
   void refreshMousePos() => handleMouse({

@@ -18,6 +18,8 @@ import android.os.Bundle
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import android.view.InputDevice
+import android.view.MotionEvent
 import android.view.WindowManager
 import android.media.MediaCodecInfo
 import android.media.MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
@@ -82,6 +84,43 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /**
+     * The Flutter engine drops ACTION_SCROLL for some mouse devices (notably
+     * bluetooth mice where InputDevice.isExternal() reports false), so the
+     * wheel never reaches Flutter as a PointerScrollEvent. Capture the wheel
+     * natively here and forward the delta to Flutter via the 'mChannel'
+     * platform channel, which sends the "wheel" message to the remote peer.
+     *
+     * The listener is attached to the window decor view (top of the view
+     * tree) so it runs before the FlutterView can handle the event. Returning
+     * true consumes the event so the engine cannot double-send when it does
+     * produce a PointerScrollEvent (e.g. wired mice).
+     */
+    private fun setupMouseWheelForwarding(view: android.view.View) {
+        view.setOnGenericMotionListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_SCROLL &&
+                (event.source and InputDevice.SOURCE_CLASS_POINTER) != 0
+            ) {
+                val density = view.resources.displayMetrics.density
+                var dx = -event.getAxisValue(MotionEvent.AXIS_HSCROLL) * density
+                var dy = -event.getAxisValue(MotionEvent.AXIS_VSCROLL) * density
+                if (dx == 0f && dy == 0f) {
+                    // Some devices report the wheel via AXIS_WHEEL instead.
+                    dy = -event.getAxisValue(MotionEvent.AXIS_WHEEL) * density
+                }
+                if (dx != 0f || dy != 0f) {
+                    flutterMethodChannel?.invokeMethod(
+                        "mouse_wheel",
+                        mapOf("dx" to dx, "dy" to dy)
+                    )
+                }
+                true
+            } else {
+                false
+            }
+        }
+    }
+
     private fun requestMediaProjection() {
         val intent = Intent(this, PermissionRequestTransparentActivity::class.java).apply {
             action = ACT_REQUEST_MEDIA_PROJECTION
@@ -102,6 +141,7 @@ class MainActivity : FlutterActivity() {
             _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             FFI.setClipboardManager(_rdClipboardManager!!)
         }
+        setupMouseWheelForwarding(window.decorView)
     }
 
     override fun onDestroy() {

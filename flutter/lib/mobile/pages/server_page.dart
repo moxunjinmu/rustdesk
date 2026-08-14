@@ -929,6 +929,15 @@ void androidChannelInit() {
             gFFI.serverModel.stopService();
             break;
           }
+        case "mouse_wheel":
+          {
+            // Native ACTION_SCROLL forwarding (bluetooth/physical mouse wheel),
+            // see InputModel.onNativeWheelScroll.
+            var dx = (arguments["dx"] ?? 0.0) as double;
+            var dy = (arguments["dy"] ?? 0.0) as double;
+            gFFI.inputModel.onNativeWheelScroll(dx, dy);
+            break;
+          }
         case "msgbox":
           {
             var type = arguments["type"] as String;
