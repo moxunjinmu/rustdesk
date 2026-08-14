@@ -84,9 +84,9 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    override fun onFlutterViewCreated(flutterView: io.flutter.embedding.android.FlutterView) {
-        super.onFlutterViewCreated(flutterView)
-        setupMouseWheelForwarding(flutterView)
+    override fun onFlutterSurfaceViewCreated(flutterSurfaceView: io.flutter.embedding.android.FlutterSurfaceView) {
+        super.onFlutterSurfaceViewCreated(flutterSurfaceView)
+        setupMouseWheelForwarding(flutterSurfaceView)
     }
 
     /**
