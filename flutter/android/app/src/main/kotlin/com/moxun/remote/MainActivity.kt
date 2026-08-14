@@ -84,40 +84,68 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    override fun onFlutterViewCreated(flutterView: io.flutter.embedding.android.FlutterView) {
+        super.onFlutterViewCreated(flutterView)
+        setupMouseWheelForwarding(flutterView)
+    }
+
     /**
      * The Flutter engine drops ACTION_SCROLL for some mouse devices (notably
-     * bluetooth mice where InputDevice.isExternal() reports false), so the
+     * bluetooth mice whose InputDevice.isExternal() reports false), so the
      * wheel never reaches Flutter as a PointerScrollEvent. Capture the wheel
      * natively here and forward the delta to Flutter via the 'mChannel'
      * platform channel, which sends the "wheel" message to the remote peer.
      *
-     * The listener is attached to the window decor view (top of the view
-     * tree) so it runs before the FlutterView can handle the event. Returning
-     * true consumes the event so the engine cannot double-send when it does
-     * produce a PointerScrollEvent (e.g. wired mice).
+     * The listener is attached to the FlutterView itself: its only child is a
+     * FlutterSurfaceView which does not consume generic motion events, so the
+     * listener always runs before the engine's onGenericMotionEvent. Returning
+     * true consumes the event, preventing double-send on devices where the
+     * engine would also produce a PointerScrollEvent.
      */
     private fun setupMouseWheelForwarding(view: android.view.View) {
         view.setOnGenericMotionListener { _, event ->
             if (event.actionMasked == MotionEvent.ACTION_SCROLL &&
                 (event.source and InputDevice.SOURCE_CLASS_POINTER) != 0
             ) {
-                val density = view.resources.displayMetrics.density
-                var dx = -event.getAxisValue(MotionEvent.AXIS_HSCROLL) * density
-                var dy = -event.getAxisValue(MotionEvent.AXIS_VSCROLL) * density
-                if (dx == 0f && dy == 0f) {
-                    // Some devices report the wheel via AXIS_WHEEL instead.
-                    dy = -event.getAxisValue(MotionEvent.AXIS_WHEEL) * density
-                }
-                if (dx != 0f || dy != 0f) {
-                    flutterMethodChannel?.invokeMethod(
-                        "mouse_wheel",
-                        mapOf("dx" to dx, "dy" to dy)
-                    )
-                }
+                forwardWheel(event)
                 true
             } else {
                 false
             }
+        }
+    }
+
+    /**
+     * Activity-level fallback: events that reached the window but were not
+     * consumed by the FlutterView (e.g. scroll sources without
+     * SOURCE_CLASS_POINTER) bubble up to the activity after the view tree;
+     * forward those too. Events consumed by FlutterView never get here, so
+     * there is no double-send.
+     */
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_SCROLL &&
+            (event.source and InputDevice.SOURCE_MOUSE) != 0
+        ) {
+            forwardWheel(event)
+            return true
+        }
+        return super.dispatchGenericMotionEvent(event)
+    }
+
+    private fun forwardWheel(event: MotionEvent) {
+        val density = resources.displayMetrics.density
+        var dx = -event.getAxisValue(MotionEvent.AXIS_HSCROLL) * density
+        var dy = -event.getAxisValue(MotionEvent.AXIS_VSCROLL) * density
+        if (dx == 0f && dy == 0f) {
+            // Some devices report the wheel via AXIS_WHEEL instead.
+            dy = -event.getAxisValue(MotionEvent.AXIS_WHEEL) * density
+        }
+        Log.d(logTag, "forward wheel dx=$dx dy=$dy src=${event.source}")
+        if (dx != 0f || dy != 0f) {
+            flutterMethodChannel?.invokeMethod(
+                "mouse_wheel",
+                mapOf("dx" to dx, "dy" to dy)
+            )
         }
     }
 
@@ -141,7 +169,6 @@ class MainActivity : FlutterActivity() {
             _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             FFI.setClipboardManager(_rdClipboardManager!!)
         }
-        setupMouseWheelForwarding(window.decorView)
     }
 
     override fun onDestroy() {

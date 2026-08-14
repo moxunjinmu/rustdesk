@@ -1668,6 +1668,7 @@ class InputModel {
   /// events for some devices (notably bluetooth mice whose
   /// InputDevice.isExternal() reports false, see rustdesk issues #1739/#3576).
   void onNativeWheelScroll(double rawDx, double rawDy) {
+    debugPrint('Android native wheel scroll dx=$rawDx dy=$rawDy');
     if (isViewOnly) return;
     if (isViewCamera) return;
     if (!parent.target!.ffiModel.pi.isSet.isTrue) return;
