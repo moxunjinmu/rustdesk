@@ -1,4 +1,4 @@
-package com.carriez.flutter_hbb
+package com.moxun.remote
 
 import ffi.FFI
 

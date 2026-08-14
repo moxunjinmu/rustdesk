@@ -230,7 +230,7 @@ docopt = "1.1"
 
 [package.metadata.bundle]
 name = "RustDesk"
-identifier = "com.carriez.rustdesk"
+identifier = "com.moxun.remote"
 icon = ["res/32x32.png", "res/128x128.png", "res/128x128@2x.png"]
 osx_minimum_system_version = "10.14"
 

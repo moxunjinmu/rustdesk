@@ -1,4 +1,4 @@
-package com.carriez.flutter_hbb
+package com.moxun.remote
 
 import android.annotation.SuppressLint
 import android.app.PendingIntent
