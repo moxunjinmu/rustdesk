@@ -91,41 +91,46 @@ class MainActivity : FlutterActivity() {
 
     /**
      * The Flutter engine drops ACTION_SCROLL for some mouse devices (notably
-     * bluetooth mice whose InputDevice.isExternal() reports false), so the
-     * wheel never reaches Flutter as a PointerScrollEvent. Capture the wheel
-     * natively here and forward the delta to Flutter via the 'mChannel'
-     * platform channel, which sends the "wheel" message to the remote peer.
+     * bluetooth mice whose InputDevice.isExternal() reports false, and
+     * HarmonyOS pads which may report non-standard source flags), so the
+     * wheel never reaches Flutter as a PointerScrollEvent. Capture every
+     * ACTION_SCROLL natively here and forward the delta to Flutter via the
+     * 'mChannel' platform channel, which sends the "wheel" message to the
+     * remote peer.
      *
-     * The listener is attached to the FlutterView itself: its only child is a
-     * FlutterSurfaceView which does not consume generic motion events, so the
-     * listener always runs before the engine's onGenericMotionEvent. Returning
-     * true consumes the event, preventing double-send on devices where the
+     * The listener is attached to the FlutterSurfaceView (child of the
+     * FlutterView): ViewGroup dispatch is child-first, so this listener
+     * always runs before the engine's onGenericMotionEvent. Returning true
+     * consumes the event, preventing double-send on devices where the
      * engine would also produce a PointerScrollEvent.
      */
     private fun setupMouseWheelForwarding(view: android.view.View) {
         view.setOnGenericMotionListener { _, event ->
-            if (event.actionMasked == MotionEvent.ACTION_SCROLL &&
-                (event.source and InputDevice.SOURCE_CLASS_POINTER) != 0
-            ) {
-                forwardWheel(event)
-                true
-            } else {
-                false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_SCROLL -> {
+                    Log.d(logTag, "native ACTION_SCROLL src=0x${Integer.toHexString(event.source)}")
+                    forwardWheel(event)
+                    true
+                }
+                MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_EXIT -> {
+                    // Diagnostic: proves the device's generic motions reach
+                    // the app layer at all (HarmonyOS may swallow them).
+                    Log.d(logTag, "native hover ${if (event.actionMasked == MotionEvent.ACTION_HOVER_ENTER) "enter" else "exit"} src=0x${Integer.toHexString(event.source)}")
+                    false
+                }
+                else -> false
             }
         }
     }
 
     /**
      * Activity-level fallback: events that reached the window but were not
-     * consumed by the FlutterView (e.g. scroll sources without
-     * SOURCE_CLASS_POINTER) bubble up to the activity after the view tree;
-     * forward those too. Events consumed by FlutterView never get here, so
-     * there is no double-send.
+     * consumed by the FlutterView bubble up to the activity after the view
+     * tree; forward those too. Events consumed by the FlutterView listener
+     * never get here, so there is no double-send.
      */
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked == MotionEvent.ACTION_SCROLL &&
-            (event.source and InputDevice.SOURCE_MOUSE) != 0
-        ) {
+        if (event.actionMasked == MotionEvent.ACTION_SCROLL) {
             forwardWheel(event)
             return true
         }
@@ -140,7 +145,7 @@ class MainActivity : FlutterActivity() {
             // Some devices report the wheel via AXIS_WHEEL instead.
             dy = -event.getAxisValue(MotionEvent.AXIS_WHEEL) * density
         }
-        Log.d(logTag, "forward wheel dx=$dx dy=$dy src=${event.source}")
+        Log.d(logTag, "forward wheel dx=$dx dy=$dy src=0x${Integer.toHexString(event.source)}")
         if (dx != 0f || dy != 0f) {
             flutterMethodChannel?.invokeMethod(
                 "mouse_wheel",
