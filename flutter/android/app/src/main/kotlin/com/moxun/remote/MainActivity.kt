@@ -38,6 +38,15 @@ import kotlin.concurrent.thread
 
 
 class MainActivity : FlutterActivity() {
+
+    // HarmonyOS does not deliver generic motion events (ACTION_SCROLL) to
+    // SurfaceView-backed windows, which silently drops bluetooth mouse
+    // wheel input (mouse clicks still work because HarmonyOS converts them
+    // to touch events). Render into a TextureView instead so the wheel
+    // reaches our onGenericMotionListener.
+    override fun getRenderMode(): RenderMode {
+        return RenderMode.texture
+    }
     companion object {
         var flutterMethodChannel: MethodChannel? = null
         private var _rdClipboardManager: RdClipboardManager? = null
@@ -89,6 +98,11 @@ class MainActivity : FlutterActivity() {
         setupMouseWheelForwarding(flutterSurfaceView)
     }
 
+    override fun onFlutterTextureViewCreated(flutterTextureView: io.flutter.embedding.android.FlutterTextureView) {
+        super.onFlutterTextureViewCreated(flutterTextureView)
+        setupMouseWheelForwarding(flutterTextureView)
+    }
+
     /**
      * The Flutter engine drops ACTION_SCROLL for some mouse devices (notably
      * bluetooth mice whose InputDevice.isExternal() reports false, and
@@ -98,10 +112,10 @@ class MainActivity : FlutterActivity() {
      * 'mChannel' platform channel, which sends the "wheel" message to the
      * remote peer.
      *
-     * The listener is attached to the FlutterSurfaceView (child of the
-     * FlutterView): ViewGroup dispatch is child-first, so this listener
-     * always runs before the engine's onGenericMotionEvent. Returning true
-     * consumes the event, preventing double-send on devices where the
+     * The listener is attached to the FlutterView's child (FlutterSurfaceView
+     * or FlutterTextureView): ViewGroup dispatch is child-first, so this
+     * listener always runs before the engine's onGenericMotionEvent. Returning
+     * true consumes the event, preventing double-send on devices where the
      * engine would also produce a PointerScrollEvent.
      */
     private fun setupMouseWheelForwarding(view: android.view.View) {
