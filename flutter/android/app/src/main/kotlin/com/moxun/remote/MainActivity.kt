@@ -8,7 +8,6 @@ package com.moxun.remote
  */
 
 import ffi.FFI
-import io.flutter.embedding.android.FlutterActivity.RenderMode
 
 import android.content.ComponentName
 import android.content.Context
@@ -39,15 +38,6 @@ import kotlin.concurrent.thread
 
 
 class MainActivity : FlutterActivity() {
-
-    // HarmonyOS does not deliver generic motion events (ACTION_SCROLL) to
-    // SurfaceView-backed windows, which silently drops bluetooth mouse
-    // wheel input (mouse clicks still work because HarmonyOS converts them
-    // to touch events). Render into a TextureView instead so the wheel
-    // reaches our onGenericMotionListener.
-    override fun getRenderMode(): RenderMode {
-        return RenderMode.texture
-    }
     companion object {
         var flutterMethodChannel: MethodChannel? = null
         private var _rdClipboardManager: RdClipboardManager? = null
