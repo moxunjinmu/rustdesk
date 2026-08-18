@@ -87,11 +87,13 @@ class MainActivity : FlutterActivity() {
     override fun onFlutterSurfaceViewCreated(flutterSurfaceView: io.flutter.embedding.android.FlutterSurfaceView) {
         super.onFlutterSurfaceViewCreated(flutterSurfaceView)
         setupMouseWheelForwarding(flutterSurfaceView)
+        setupWheelSimDetection(flutterSurfaceView)
     }
 
     override fun onFlutterTextureViewCreated(flutterTextureView: io.flutter.embedding.android.FlutterTextureView) {
         super.onFlutterTextureViewCreated(flutterTextureView)
         setupMouseWheelForwarding(flutterTextureView)
+        setupWheelSimDetection(flutterTextureView)
     }
 
     /**
@@ -142,6 +144,83 @@ class MainActivity : FlutterActivity() {
         return super.dispatchGenericMotionEvent(event)
     }
 
+    /**
+     * HarmonyOS never emits ACTION_SCROLL for bluetooth mouse wheels.
+     * Instead its MouseWheelSynthesizer (running in our process, see the
+     * "create first down/last up event" logs) turns each wheel notch into a
+     * fast single-finger drag of ~160dp on the app window - which the remote
+     * UI reads as a canvas drag, not a scroll. Detect those drags: a very
+     * fast, straight, single-pointer sequence (<200ms, >100dp, >1000dp/s)
+     * is treated as a wheel notch; we consume it and forward the delta as a
+     * wheel message. Real finger drags are slower / less straight and pass
+     * through untouched.
+     */
+    private var wheelSimDownX = 0f
+    private var wheelSimDownY = 0f
+    private var wheelSimDownT = 0L
+    private var wheelSimLastX = 0f
+    private var wheelSimLastY = 0f
+    private var wheelSimLastT = 0L
+    private var wheelSimActive = false
+    private var wheelSimConsume = false
+
+    private fun setupWheelSimDetection(view: android.view.View) {
+        view.setOnTouchListener { _, event ->
+            if (event.pointerCount > 1) {
+                wheelSimConsume = false
+                wheelSimActive = false
+                return@setOnTouchListener false
+            }
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    wheelSimDownX = event.x
+                    wheelSimDownY = event.y
+                    wheelSimDownT = event.eventTime
+                    wheelSimLastX = event.x
+                    wheelSimLastY = event.y
+                    wheelSimLastT = event.eventTime
+                    wheelSimActive = true
+                    wheelSimConsume = false
+                    Log.d(logTag, "touch down x=${event.x} y=${event.y}")
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (!wheelSimActive) return@setOnTouchListener false
+                    wheelSimLastX = event.x
+                    wheelSimLastY = event.y
+                    wheelSimLastT = event.eventTime
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (!wheelSimActive) return@setOnTouchListener false
+                    wheelSimActive = false
+                    val dt = wheelSimLastT - wheelSimDownT
+                    val dx = wheelSimLastX - wheelSimDownX
+                    val dy = wheelSimLastY - wheelSimDownY
+                    val dist = Math.hypot(dx.toDouble(), dy.toDouble())
+                    val speed = if (dt > 0) dist * 1000.0 / dt.toDouble() else 0.0
+                    val straight = maxOf(Math.abs(dx), Math.abs(dy)) > 0.85 * dist
+                    Log.d(logTag, "touch up dx=$dx dy=$dy dt=${dt}ms dist=$dist speed=$speed straight=$straight")
+                    if (dt in 1..200 && dist > 100 && speed > 1000.0 && straight) {
+                        Log.d(logTag, "wheel-sim detected, forwarding as wheel dx=$dx dy=$dy")
+                        sendWheelDelta(dx.toDouble(), dy.toDouble())
+                        wheelSimConsume = true
+                    } else {
+                        wheelSimConsume = false
+                    }
+                }
+            }
+            wheelSimConsume
+        }
+    }
+
+    private fun sendWheelDelta(dx: Double, dy: Double) {
+        if (dx != 0.0 || dy != 0.0) {
+            flutterMethodChannel?.invokeMethod(
+                "mouse_wheel",
+                mapOf("dx" to dx, "dy" to dy)
+            )
+        }
+    }
+
     private fun forwardWheel(event: MotionEvent) {
         val density = resources.displayMetrics.density
         var dx = -event.getAxisValue(MotionEvent.AXIS_HSCROLL) * density
@@ -151,12 +230,7 @@ class MainActivity : FlutterActivity() {
             dy = -event.getAxisValue(MotionEvent.AXIS_WHEEL) * density
         }
         Log.d(logTag, "forward wheel dx=$dx dy=$dy src=0x${Integer.toHexString(event.source)}")
-        if (dx != 0f || dy != 0f) {
-            flutterMethodChannel?.invokeMethod(
-                "mouse_wheel",
-                mapOf("dx" to dx, "dy" to dy)
-            )
-        }
+        sendWheelDelta(dx.toDouble(), dy.toDouble())
     }
 
     private fun requestMediaProjection() {
