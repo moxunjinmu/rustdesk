@@ -87,13 +87,13 @@ class MainActivity : FlutterActivity() {
     override fun onFlutterSurfaceViewCreated(flutterSurfaceView: io.flutter.embedding.android.FlutterSurfaceView) {
         super.onFlutterSurfaceViewCreated(flutterSurfaceView)
         setupMouseWheelForwarding(flutterSurfaceView)
-        setupWheelSimDetection(flutterSurfaceView)
+        setupHarmonyMouseWheelWorkaround(flutterSurfaceView)
     }
 
     override fun onFlutterTextureViewCreated(flutterTextureView: io.flutter.embedding.android.FlutterTextureView) {
         super.onFlutterTextureViewCreated(flutterTextureView)
         setupMouseWheelForwarding(flutterTextureView)
-        setupWheelSimDetection(flutterTextureView)
+        setupHarmonyMouseWheelWorkaround(flutterTextureView)
     }
 
     /**
@@ -144,72 +144,114 @@ class MainActivity : FlutterActivity() {
         return super.dispatchGenericMotionEvent(event)
     }
 
-    /**
-     * HarmonyOS never emits ACTION_SCROLL for bluetooth mouse wheels.
-     * Instead its MouseWheelSynthesizer (running in our process, see the
-     * "create first down/last up event" logs) turns each wheel notch into a
-     * fast single-finger drag of ~160dp on the app window - which the remote
-     * UI reads as a canvas drag, not a scroll. Detect those drags: a very
-     * fast, straight, single-pointer sequence (<200ms, >100dp, >1000dp/s)
-     * is treated as a wheel notch; we consume it and forward the delta as a
-     * wheel message. Real finger drags are slower / less straight and pass
-     * through untouched.
-     */
-    private var wheelSimDownX = 0f
-    private var wheelSimDownY = 0f
-    private var wheelSimDownT = 0L
-    private var wheelSimLastX = 0f
-    private var wheelSimLastY = 0f
-    private var wheelSimLastT = 0L
-    private var wheelSimActive = false
-    private var wheelSimConsume = false
+    private var harmonyWheelActive = false
+    private var harmonyWheelLastX = 0f
+    private var harmonyWheelLastY = 0f
+    private var harmonyWheelAccumX = 0f
+    private var harmonyWheelAccumY = 0f
+    private var harmonyWheelFallbackEnabled = false
 
-    private fun setupWheelSimDetection(view: android.view.View) {
-        view.setOnTouchListener { _, event ->
-            if (event.pointerCount > 1) {
-                wheelSimConsume = false
-                wheelSimActive = false
-                return@setOnTouchListener false
+    /**
+     * HarmonyOS tablets intercept mouse ACTION_SCROLL in ViewRootImpl and use
+     * MouseWheelSynthesizer to replace it with virtual touchscreen drags.
+     * Disable that compatibility behavior through the vendor ViewRootImpl API
+     * so the original event reaches setupMouseWheelForwarding().
+     *
+     * Some HarmonyOS releases may block reflective access. Keep a deterministic
+     * fallback for those versions: framework-generated drags use
+     * SOURCE_TOUCHSCREEN with the virtual device id (-1), while real finger
+     * input has the physical touchscreen's positive device id.
+     */
+    private fun setupHarmonyMouseWheelWorkaround(view: android.view.View) {
+        if (!Build.MANUFACTURER.equals("HUAWEI", ignoreCase = true)) return
+
+        view.post {
+            val viewRoot = view.rootView.parent
+            if (viewRoot == null) {
+                Log.w(logTag, "HarmonyOS mouse wheel: ViewRootImpl is unavailable")
+                harmonyWheelFallbackEnabled = true
+                return@post
             }
+            try {
+                val method = viewRoot.javaClass.getMethod(
+                    "setMouseWheelInputEnable",
+                    java.lang.Boolean.TYPE
+                )
+                method.invoke(viewRoot, false)
+                Log.d(logTag, "HarmonyOS mouse wheel synthesis disabled")
+            } catch (e: ReflectiveOperationException) {
+                harmonyWheelFallbackEnabled = true
+                Log.w(logTag, "HarmonyOS mouse wheel API unavailable; using touch fallback", e)
+            } catch (e: SecurityException) {
+                harmonyWheelFallbackEnabled = true
+                Log.w(logTag, "HarmonyOS mouse wheel API blocked; using touch fallback", e)
+            }
+        }
+
+        view.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    wheelSimDownX = event.x
-                    wheelSimDownY = event.y
-                    wheelSimDownT = event.eventTime
-                    wheelSimLastX = event.x
-                    wheelSimLastY = event.y
-                    wheelSimLastT = event.eventTime
-                    wheelSimActive = true
-                    wheelSimConsume = false
-                    Log.d(logTag, "touch down x=${event.x} y=${event.y}")
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    if (!wheelSimActive) return@setOnTouchListener false
-                    wheelSimLastX = event.x
-                    wheelSimLastY = event.y
-                    wheelSimLastT = event.eventTime
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    if (!wheelSimActive) return@setOnTouchListener false
-                    wheelSimActive = false
-                    val dt = wheelSimLastT - wheelSimDownT
-                    val dx = wheelSimLastX - wheelSimDownX
-                    val dy = wheelSimLastY - wheelSimDownY
-                    val dist = Math.hypot(dx.toDouble(), dy.toDouble())
-                    val speed = if (dt > 0) dist * 1000.0 / dt.toDouble() else 0.0
-                    val straight = maxOf(Math.abs(dx), Math.abs(dy)) > 0.85 * dist
-                    Log.d(logTag, "touch up dx=$dx dy=$dy dt=${dt}ms dist=$dist speed=$speed straight=$straight")
-                    if (dt in 1..200 && dist > 100 && speed > 1000.0 && straight) {
-                        Log.d(logTag, "wheel-sim detected, forwarding as wheel dx=$dx dy=$dy")
-                        sendWheelDelta(dx.toDouble(), dy.toDouble())
-                        wheelSimConsume = true
-                    } else {
-                        wheelSimConsume = false
+                    harmonyWheelActive = harmonyWheelFallbackEnabled &&
+                            event.pointerCount == 1 &&
+                            event.source == InputDevice.SOURCE_TOUCHSCREEN &&
+                            event.deviceId <= 0
+                    if (harmonyWheelActive) {
+                        harmonyWheelLastX = event.x
+                        harmonyWheelLastY = event.y
+                        harmonyWheelAccumX = 0f
+                        harmonyWheelAccumY = 0f
+                        Log.d(logTag, "HarmonyOS synthesized wheel fallback started")
                     }
                 }
+                MotionEvent.ACTION_MOVE -> {
+                    if (!harmonyWheelActive) return@setOnTouchListener false
+                    harmonyWheelAccumX += event.x - harmonyWheelLastX
+                    harmonyWheelAccumY += event.y - harmonyWheelLastY
+                    harmonyWheelLastX = event.x
+                    harmonyWheelLastY = event.y
+                    forwardSynthesizedWheelSteps()
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (!harmonyWheelActive) return@setOnTouchListener false
+                    harmonyWheelActive = false
+                    return@setOnTouchListener true
+                }
             }
-            wheelSimConsume
+            harmonyWheelActive
         }
+    }
+
+    private fun forwardSynthesizedWheelSteps() {
+        val step = 64f * resources.displayMetrics.density
+        val horizontal = Math.abs(harmonyWheelAccumX) > Math.abs(harmonyWheelAccumY)
+        val accumulated = if (horizontal) harmonyWheelAccumX else harmonyWheelAccumY
+        val steps = (Math.abs(accumulated) / step).toInt()
+        if (steps == 0) return
+
+        val delta = if (accumulated > 0) -step.toDouble() else step.toDouble()
+        repeat(steps) {
+            if (horizontal) {
+                sendWheelDelta(delta, 0.0)
+            } else {
+                sendWheelDelta(0.0, delta)
+            }
+        }
+        if (horizontal) {
+            harmonyWheelAccumX = if (accumulated > 0) {
+                accumulated - step * steps
+            } else {
+                accumulated + step * steps
+            }
+            harmonyWheelAccumY = 0f
+        } else {
+            harmonyWheelAccumY = if (accumulated > 0) {
+                accumulated - step * steps
+            } else {
+                accumulated + step * steps
+            }
+            harmonyWheelAccumX = 0f
+        }
+        Log.d(logTag, "HarmonyOS synthesized wheel fallback forwarded $steps step(s)")
     }
 
     private fun sendWheelDelta(dx: Double, dy: Double) {
