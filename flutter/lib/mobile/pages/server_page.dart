@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_home_page.dart';
@@ -900,7 +901,9 @@ class ClientInfo extends StatelessWidget {
 
 void androidChannelInit() {
   gFFI.setMethodCallHandler((method, arguments) {
-    debugPrint("flutter got android msg,$method,$arguments");
+    if (kDebugMode) {
+      debugPrint("flutter got android msg,$method,$arguments");
+    }
     try {
       switch (method) {
         case "start_capture":
@@ -936,6 +939,15 @@ void androidChannelInit() {
             var dx = (arguments["dx"] ?? 0.0) as double;
             var dy = (arguments["dy"] ?? 0.0) as double;
             gFFI.inputModel.onNativeWheelScroll(dx, dy);
+            break;
+          }
+        case "mouse_wheel_steps":
+          {
+            // HarmonyOS turns wheel input into virtual touchscreen drags.
+            // Kotlin restores and batches the discrete step count per frame.
+            var dx = (arguments["dx"] ?? 0) as num;
+            var dy = (arguments["dy"] ?? 0) as num;
+            gFFI.inputModel.onNativeWheelSteps(dx.toInt(), dy.toInt());
             break;
           }
         case "msgbox":

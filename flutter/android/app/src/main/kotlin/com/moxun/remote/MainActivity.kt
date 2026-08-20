@@ -115,14 +115,18 @@ class MainActivity : FlutterActivity() {
         view.setOnGenericMotionListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_SCROLL -> {
-                    Log.d(logTag, "native ACTION_SCROLL src=0x${Integer.toHexString(event.source)}")
+                    if (BuildConfig.DEBUG) {
+                        Log.d(logTag, "native ACTION_SCROLL src=0x${Integer.toHexString(event.source)}")
+                    }
                     forwardWheel(event)
                     true
                 }
                 MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_EXIT -> {
                     // Diagnostic: proves the device's generic motions reach
                     // the app layer at all (HarmonyOS may swallow them).
-                    Log.d(logTag, "native hover ${if (event.actionMasked == MotionEvent.ACTION_HOVER_ENTER) "enter" else "exit"} src=0x${Integer.toHexString(event.source)}")
+                    if (BuildConfig.DEBUG) {
+                        Log.d(logTag, "native hover ${if (event.actionMasked == MotionEvent.ACTION_HOVER_ENTER) "enter" else "exit"} src=0x${Integer.toHexString(event.source)}")
+                    }
                     false
                 }
                 else -> false
@@ -149,7 +153,14 @@ class MainActivity : FlutterActivity() {
     private var harmonyWheelLastY = 0f
     private var harmonyWheelAccumX = 0f
     private var harmonyWheelAccumY = 0f
+    private var harmonyWheelHorizontal: Boolean? = null
     private var harmonyWheelFallbackEnabled = false
+    private var harmonyPendingWheelX = 0
+    private var harmonyPendingWheelY = 0
+    private var harmonyWheelFrameScheduled = false
+    private val harmonyWheelStepPx: Float by lazy(LazyThreadSafetyMode.NONE) {
+        64f * resources.displayMetrics.density
+    }
 
     /**
      * HarmonyOS tablets intercept mouse ACTION_SCROLL in ViewRootImpl and use
@@ -200,7 +211,10 @@ class MainActivity : FlutterActivity() {
                         harmonyWheelLastY = event.y
                         harmonyWheelAccumX = 0f
                         harmonyWheelAccumY = 0f
-                        Log.d(logTag, "HarmonyOS synthesized wheel fallback started")
+                        harmonyWheelHorizontal = null
+                        if (BuildConfig.DEBUG) {
+                            Log.d(logTag, "HarmonyOS synthesized wheel fallback started")
+                        }
                     }
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -209,11 +223,19 @@ class MainActivity : FlutterActivity() {
                     harmonyWheelAccumY += event.y - harmonyWheelLastY
                     harmonyWheelLastX = event.x
                     harmonyWheelLastY = event.y
-                    forwardSynthesizedWheelSteps()
+                    if (harmonyWheelHorizontal == null &&
+                        maxOf(Math.abs(harmonyWheelAccumX), Math.abs(harmonyWheelAccumY)) >=
+                        harmonyWheelStepPx / 2f
+                    ) {
+                        harmonyWheelHorizontal =
+                            Math.abs(harmonyWheelAccumX) > Math.abs(harmonyWheelAccumY)
+                    }
+                    forwardSynthesizedWheelSteps(view)
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (!harmonyWheelActive) return@setOnTouchListener false
                     harmonyWheelActive = false
+                    harmonyWheelHorizontal = null
                     return@setOnTouchListener true
                 }
             }
@@ -221,37 +243,65 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun forwardSynthesizedWheelSteps() {
-        val step = 64f * resources.displayMetrics.density
-        val horizontal = Math.abs(harmonyWheelAccumX) > Math.abs(harmonyWheelAccumY)
+    private fun forwardSynthesizedWheelSteps(view: android.view.View) {
+        val horizontal = harmonyWheelHorizontal ?: return
         val accumulated = if (horizontal) harmonyWheelAccumX else harmonyWheelAccumY
-        val steps = (Math.abs(accumulated) / step).toInt()
+        val steps = (Math.abs(accumulated) / harmonyWheelStepPx).toInt()
         if (steps == 0) return
 
-        val delta = if (accumulated > 0) -step.toDouble() else step.toDouble()
-        repeat(steps) {
-            if (horizontal) {
-                sendWheelDelta(delta, 0.0)
-            } else {
-                sendWheelDelta(0.0, delta)
-            }
+        val signedSteps = if (accumulated > 0) steps else -steps
+        if (horizontal) {
+            queueSynthesizedWheelSteps(view, signedSteps, 0)
+        } else {
+            queueSynthesizedWheelSteps(view, 0, signedSteps)
         }
         if (horizontal) {
             harmonyWheelAccumX = if (accumulated > 0) {
-                accumulated - step * steps
+                accumulated - harmonyWheelStepPx * steps
             } else {
-                accumulated + step * steps
+                accumulated + harmonyWheelStepPx * steps
             }
             harmonyWheelAccumY = 0f
         } else {
             harmonyWheelAccumY = if (accumulated > 0) {
-                accumulated - step * steps
+                accumulated - harmonyWheelStepPx * steps
             } else {
-                accumulated + step * steps
+                accumulated + harmonyWheelStepPx * steps
             }
             harmonyWheelAccumX = 0f
         }
-        Log.d(logTag, "HarmonyOS synthesized wheel fallback forwarded $steps step(s)")
+        if (BuildConfig.DEBUG) {
+            Log.d(logTag, "HarmonyOS synthesized wheel fallback queued $signedSteps step(s)")
+        }
+    }
+
+    private fun queueSynthesizedWheelSteps(
+        view: android.view.View,
+        xSteps: Int,
+        ySteps: Int
+    ) {
+        harmonyPendingWheelX += xSteps
+        harmonyPendingWheelY += ySteps
+        if (harmonyWheelFrameScheduled) return
+
+        harmonyWheelFrameScheduled = true
+        view.postOnAnimation {
+            val pendingX = harmonyPendingWheelX
+            val pendingY = harmonyPendingWheelY
+            harmonyPendingWheelX = 0
+            harmonyPendingWheelY = 0
+            harmonyWheelFrameScheduled = false
+            sendWheelSteps(pendingX, pendingY)
+        }
+    }
+
+    private fun sendWheelSteps(xSteps: Int, ySteps: Int) {
+        if (xSteps != 0 || ySteps != 0) {
+            flutterMethodChannel?.invokeMethod(
+                "mouse_wheel_steps",
+                mapOf("dx" to xSteps, "dy" to ySteps)
+            )
+        }
     }
 
     private fun sendWheelDelta(dx: Double, dy: Double) {
@@ -271,7 +321,9 @@ class MainActivity : FlutterActivity() {
             // Some devices report the wheel via AXIS_WHEEL instead.
             dy = -event.getAxisValue(MotionEvent.AXIS_WHEEL) * density
         }
-        Log.d(logTag, "forward wheel dx=$dx dy=$dy src=0x${Integer.toHexString(event.source)}")
+        if (BuildConfig.DEBUG) {
+            Log.d(logTag, "forward wheel dx=$dx dy=$dy src=0x${Integer.toHexString(event.source)}")
+        }
         sendWheelDelta(dx.toDouble(), dy.toDouble())
     }
 

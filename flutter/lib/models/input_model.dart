@@ -1668,11 +1668,26 @@ class InputModel {
   /// events for some devices (notably bluetooth mice whose
   /// InputDevice.isExternal() reports false, see rustdesk issues #1739/#3576).
   void onNativeWheelScroll(double rawDx, double rawDy) {
-    debugPrint('Android native wheel scroll dx=$rawDx dy=$rawDy');
+    if (kDebugMode) {
+      debugPrint('Android native wheel scroll dx=$rawDx dy=$rawDy');
+    }
     if (isViewOnly) return;
     if (isViewCamera) return;
     if (!parent.target!.ffiModel.pi.isSet.isTrue) return;
     _sendWheelDelta(rawDx, rawDy);
+  }
+
+  /// Android-only entry point for discrete wheel steps restored from
+  /// HarmonyOS virtual touchscreen drags. The native side batches all steps
+  /// produced in one display frame, so preserve their count here.
+  void onNativeWheelSteps(int dx, int dy) {
+    if (kDebugMode) {
+      debugPrint('Android native wheel steps dx=$dx dy=$dy');
+    }
+    if (isViewOnly) return;
+    if (isViewCamera) return;
+    if (!parent.target!.ffiModel.pi.isSet.isTrue) return;
+    _sendDiscreteWheelSteps(dx, dy);
   }
 
   void _sendWheelDelta(double rawDx, double rawDy) {
@@ -1713,6 +1728,11 @@ class InputModel {
     } else if (dy < 0) {
       dy = accel;
     }
+    _sendDiscreteWheelSteps(dx, dy);
+  }
+
+  void _sendDiscreteWheelSteps(int dx, int dy) {
+    if (dx == 0 && dy == 0) return;
     bind.sessionSendMouse(
         sessionId: sessionId,
         msg: '{"type": "wheel", "x": "$dx", "y": "$dy"}');
