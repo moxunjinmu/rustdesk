@@ -65,12 +65,6 @@
             android:launchMode="singleTop"
             android:theme="@style/LaunchTheme"
             android:windowSoftInputMode="adjustResize">
-            <!-- Render into a TextureView: HarmonyOS does not deliver generic
-                 motion events (ACTION_SCROLL) to SurfaceView-backed windows,
-                 which silently drops bluetooth mouse wheel input. -->
-            <meta-data
-                android:name="io.flutter.embedding.android.RenderMode"
-                android:value="texture" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
