@@ -530,6 +530,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Installation Successful!", "Paigaldus oli edukas!"),
         ("Installation failed!", "Paigaldus ebaõnnestus!"),
         ("Reverse mouse wheel", "Pööra hiireratas"),
+        ("Smooth mouse wheel", ""),
         ("{} sessions", "{} seanssi"),
         ("scam_title", "Võid olla KELMUSE ohver!"),
         ("scam_text1", "Kui räägid telefoniga kellegagi, keda EI TUNNE ja EI USALDA, kes on palunud sul RustDeski kasutada ja teenus käivitada, ära jätka ning lõpeta kõne koheselt."),

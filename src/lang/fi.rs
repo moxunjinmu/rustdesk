@@ -530,6 +530,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Installation Successful!", "Asennus onnistui!"),
         ("Installation failed!", "Asennus epäonnistui!"),
         ("Reverse mouse wheel", "Käänteinen hiiren rullaussuunta"),
+        ("Smooth mouse wheel", ""),
         ("{} sessions", "{} istuntoa"),
         ("scam_title", "Huijausvaroitus"),
         ("scam_text1", "Älä anna tuntemattomille henkilöille pääsyä tietokoneeseesi."),

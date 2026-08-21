@@ -460,6 +460,22 @@ class InputModel {
   // Applies only to fast, non-smooth bursts to preserve single-step scrolling.
   // Flutter uses microseconds for dt, so velocity is in delta/us.
 
+  // HarmonyOS restores physical wheel notches as discrete steps. When enabled,
+  // spread each step over a short ease-out curve and send high-resolution
+  // trackpad deltas to peers that support them.
+  Timer? _smoothWheelTimer;
+  int _smoothWheelRemainingX = 0;
+  int _smoothWheelRemainingY = 0;
+  int _smoothWheelCurveStartX = 0;
+  int _smoothWheelCurveStartY = 0;
+  int _smoothWheelCurveSentX = 0;
+  int _smoothWheelCurveSentY = 0;
+  int _smoothWheelFrame = 0;
+  static const int _smoothWheelFrameDurationMs = 16;
+  static const int _smoothWheelFrameCount = 7;
+  static const int _smoothWheelWindowsUnitsPerStep = 120;
+  static const int _smoothWheelMacUnitsPerStep = 32;
+
   // Relative mouse mode (for games/3D apps).
   final relativeMouseMode = false.obs;
   late final RelativeMouseModel _relativeMouse;
@@ -1275,6 +1291,10 @@ class InputModel {
     }
   }
 
+  void disposeSmoothMouseWheel() {
+    _cancelSmoothWheelAnimation();
+  }
+
   void onWindowBlur() {
     _relativeMouse.onWindowBlur();
   }
@@ -1687,7 +1707,111 @@ class InputModel {
     if (isViewOnly) return;
     if (isViewCamera) return;
     if (!parent.target!.ffiModel.pi.isSet.isTrue) return;
-    _sendDiscreteWheelSteps(dx, dy);
+    if (smoothMouseWheelEnabled &&
+        (peerPlatform == kPeerPlatformWindows ||
+            peerPlatform == kPeerPlatformMacOS)) {
+      _enqueueSmoothWheelSteps(dx, dy);
+    } else {
+      _sendDiscreteWheelSteps(dx, dy);
+    }
+  }
+
+  bool get smoothMouseWheelEnabled => bind.sessionGetToggleOptionSync(
+      sessionId: sessionId, arg: kOptionSmoothMouseWheel);
+
+  Future<void> setSmoothMouseWheelEnabled(bool enabled) async {
+    if (smoothMouseWheelEnabled == enabled) return;
+    await bind.sessionToggleOption(
+        sessionId: sessionId, value: kOptionSmoothMouseWheel);
+    if (!enabled) {
+      _cancelSmoothWheelAnimation();
+    }
+  }
+
+  void _enqueueSmoothWheelSteps(int dx, int dy) {
+    final unitsPerStep = peerPlatform == kPeerPlatformWindows
+        ? _smoothWheelWindowsUnitsPerStep
+        : _smoothWheelMacUnitsPerStep;
+    _smoothWheelRemainingX = _mergeSmoothWheelAxis(
+        _smoothWheelRemainingX, dx * unitsPerStep);
+    _smoothWheelRemainingY = _mergeSmoothWheelAxis(
+        _smoothWheelRemainingY, dy * unitsPerStep);
+    _restartSmoothWheelCurve();
+    _advanceSmoothWheelFrame();
+    _smoothWheelTimer ??= Timer.periodic(
+        const Duration(milliseconds: _smoothWheelFrameDurationMs),
+        (_) => _advanceSmoothWheelFrame());
+  }
+
+  int _mergeSmoothWheelAxis(int remaining, int added) {
+    if (remaining != 0 && added != 0 && remaining.sign != added.sign) {
+      return added;
+    }
+    return remaining + added;
+  }
+
+  void _restartSmoothWheelCurve() {
+    _smoothWheelCurveStartX = _smoothWheelRemainingX;
+    _smoothWheelCurveStartY = _smoothWheelRemainingY;
+    _smoothWheelCurveSentX = 0;
+    _smoothWheelCurveSentY = 0;
+    _smoothWheelFrame = 0;
+  }
+
+  double _smoothWheelEaseOut(double t) {
+    final inverse = 1.0 - t;
+    return 1.0 - inverse * inverse * inverse;
+  }
+
+  void _advanceSmoothWheelFrame() {
+    if (_smoothWheelRemainingX == 0 && _smoothWheelRemainingY == 0) {
+      _cancelSmoothWheelAnimation();
+      return;
+    }
+
+    _smoothWheelFrame++;
+    final isLastFrame = _smoothWheelFrame >= _smoothWheelFrameCount;
+    final progress = isLastFrame
+        ? 1.0
+        : _smoothWheelEaseOut(
+            _smoothWheelFrame / _smoothWheelFrameCount);
+    final curveTargetX = (_smoothWheelCurveStartX * progress).round();
+    final curveTargetY = (_smoothWheelCurveStartY * progress).round();
+    var frameX = curveTargetX - _smoothWheelCurveSentX;
+    var frameY = curveTargetY - _smoothWheelCurveSentY;
+    _smoothWheelCurveSentX = curveTargetX;
+    _smoothWheelCurveSentY = curveTargetY;
+
+    if (isLastFrame) {
+      frameX = _smoothWheelRemainingX;
+      frameY = _smoothWheelRemainingY;
+    }
+    _smoothWheelRemainingX -= frameX;
+    _smoothWheelRemainingY -= frameY;
+    _sendSmoothWheelDelta(frameX, frameY);
+
+    if (isLastFrame) {
+      _cancelSmoothWheelAnimation();
+    }
+  }
+
+  void _sendSmoothWheelDelta(int dx, int dy) {
+    if (dx == 0 && dy == 0) return;
+    bind.sessionSendMouse(
+        sessionId: sessionId,
+        msg: '{"type": "trackpad", "x": "$dx", "y": "$dy"}');
+  }
+
+  void _cancelSmoothWheelAnimation() {
+    _smoothWheelTimer?.cancel();
+    _smoothWheelTimer = null;
+    _smoothWheelRemainingX = 0;
+    _smoothWheelRemainingY = 0;
+    _smoothWheelCurveStartX = 0;
+    _smoothWheelCurveStartY = 0;
+    _smoothWheelCurveSentX = 0;
+    _smoothWheelCurveSentY = 0;
+    _smoothWheelFrame = 0;
   }
 
   void _sendWheelDelta(double rawDx, double rawDy) {

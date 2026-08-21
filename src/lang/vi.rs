@@ -530,6 +530,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Installation Successful!", "Cài đặt thành công!"),
         ("Installation failed!", "Cài đặt thất bại!"),
         ("Reverse mouse wheel", "Đảo ngược con lăn chuột"),
+        ("Smooth mouse wheel", ""),
         ("{} sessions", "{} phiên"),
         ("scam_title", "CẢNH BÁO LỪA ĐẢO"),
         ("scam_text1", "KHÔNG chia sẻ ID/Mật khẩu với người lạ qua điện thoại. Nếu họ yêu cầu, họ có thể là kẻ lừa đảo."),

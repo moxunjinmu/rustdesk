@@ -530,6 +530,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Installation Successful!", "Instalação concluída com sucesso!"),
         ("Installation failed!", "A instalação falhou!"),
         ("Reverse mouse wheel", "Inverter roda do rato"),
+        ("Smooth mouse wheel", ""),
         ("{} sessions", "{} sessões"),
         ("scam_title", "PODE ESTAR A SER VÍTIMA DE BURLA!"),
         ("scam_text1", "Se estiver ao telefone com alguém que NÃO conhece NEM em quem confia e que lhe pediu para usar o RustDesk e iniciar o serviço, não prossiga e desligue imediatamente."),

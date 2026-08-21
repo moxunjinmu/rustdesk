@@ -1223,6 +1223,21 @@ List<TToggleMenu> toolbarKeyboardToggles(FFI ffi) {
         child: Text(translate('Reverse mouse wheel'))));
   }
 
+  // Smooth physical mouse wheel input restored from HarmonyOS virtual drags.
+  if (isAndroid && ffiModel.keyboard) {
+    final value = ffi.inputModel.smoothMouseWheelEnabled;
+    final enabled = !ffi.ffiModel.viewOnly;
+    v.add(TToggleMenu(
+        value: value,
+        onChanged: enabled
+            ? (value) async {
+                if (value == null) return;
+                await ffi.inputModel.setSmoothMouseWheelEnabled(value);
+              }
+            : null,
+        child: Text(translate('Smooth mouse wheel'))));
+  }
+
   // swap left right mouse
   if (ffiModel.keyboard) {
     final option = 'swap-left-right-mouse';
