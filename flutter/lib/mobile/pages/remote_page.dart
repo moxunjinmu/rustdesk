@@ -1174,6 +1174,12 @@ class CursorPaint extends StatelessWidget {
     double hotx = m.hotx;
     double hoty = m.hoty;
     var image = m.image;
+    var cursorPixelScale = 1.0;
+    if (image != null && ffiModel.pi.platform == kPeerPlatformMacOS) {
+      // macOS sends cursor images in logical points while Retina cursor
+      // positions and display frames use physical pixels.
+      cursorPixelScale = ffiModel.pi.tryGetDisplay()?.scale ?? 1.0;
+    }
     if (image == null) {
       if (preDefaultCursor.image != null) {
         image = preDefaultCursor.image;
@@ -1188,26 +1194,26 @@ class CursorPaint extends StatelessWidget {
       image = preForbiddenCursor.image;
       hotx = preForbiddenCursor.image!.width / 2;
       hoty = preForbiddenCursor.image!.height / 2;
+      cursorPixelScale = 1.0;
     }
     if (image == null) {
       return Offstage();
     }
 
     final minSize = 12.0;
-    double mins =
+    final minPaintScale =
         minSize / (image.width > image.height ? image.width : image.height);
-    double factor = 1.0;
-    if (s < mins) {
-      factor = s / mins;
-    }
-    final s2 = s < mins ? mins : s;
+    final naturalPaintScale = s * cursorPixelScale;
+    final paintScale = naturalPaintScale < minPaintScale
+        ? minPaintScale
+        : naturalPaintScale;
     final adjust = c.getAdjustY();
     return CustomPaint(
       painter: ImagePainter(
           image: image,
-          x: (m.x - hotx) * factor + c.x / s2,
-          y: (m.y - hoty) * factor + (c.y + adjust) / s2,
-          scale: s2),
+          x: (m.x * s + c.x) / paintScale - hotx,
+          y: (m.y * s + c.y + adjust) / paintScale - hoty,
+          scale: paintScale),
     );
   }
 }
